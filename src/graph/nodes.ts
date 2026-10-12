@@ -24,6 +24,8 @@ export const fill = (tpl: string, vars: Record<string, unknown>) => tpl.replace(
 import { readMem, writeMem, listStores, appendMem } from './memory';
 export { readMem, writeMem, listStores };
 import { bm25Rank, embeddingRank, everyFires, turnNumber } from './search';
+import { scanLore } from './lore';
+import { retrieve } from './rag';
 import { estimateTokens as estTok } from '../pipeline';
 import { loadProfile, profileLines, getPath, fieldValue, fmt, validatePatch, commit, parsePatchText, updateInstruction, applyTick } from './profile';
 const profVal = (env: RunEnv, path: string) => { const p = loadProfile(env.ctx.memNs); const f = p.schema.find((x) => x.key === path); return f ? fieldValue(p, f) : getPath(p.values, path); };
@@ -246,6 +248,35 @@ export const NODE_DEFS: NodeDef[] = [
       } else { if (method === 'embeddings') { method = 'keyword'; note = 'dry run: keyword preview'; } ranked = bm25Rank(q, docs); }
       const top = ranked.slice(0, k);
       return { text: top.map((r) => docs[r.i]).join(join), _method: method, _scores: top.map((r) => r.score.toFixed(3)).join(', '), ...(note ? { _note: note } : {}) };
+    } },
+  { type: 'lorebook', label: 'Lorebook', color: '#2ea043', category: 'memory', inputs: ['text'], outputs: ['text', 'fired'],
+    fields: [{ key: 'scope', label: 'Books', kind: 'select', options: ['character + global', 'character', 'global'] },
+      { key: 'depth', label: 'Scan last N messages', kind: 'number', help: 'Plus the wired text input, if any.' },
+      { key: 'budget', label: 'Token budget (0 = unlimited)', kind: 'number' },
+      { key: 'header', label: 'Header', kind: 'text' }, { key: 'joiner', label: 'Join with', kind: 'text' }],
+    defaults: { scope: 'character + global', depth: 4, budget: 500, header: '[World info]', joiner: '\\n\\n' },
+    run: (i, c, env) => {
+      const depth = Number(c.depth) || 0; const msgs = env.ctx.history.filter((m) => m.role !== 'system');
+      const scan = [...(depth > 0 ? msgs.slice(-depth).map((m) => m.content) : []), ...('text' in i ? [str(i.text)] : [])].join('\n');
+      const r = scanLore(scan, env.ctx.memNs, { scope: String(c.scope), depth, budget: Number(c.budget) || 0, header: String(c.header ?? ''), joiner: String(c.joiner ?? '\n\n').replace(/\\n/g, '\n') });
+      return { text: r.text, fired: r.fired.map((f) => `${f.included ? '✓' : '✗'} ${f.title} (${f.source}): ${f.reason}, ~${f.tokens} tok`).join('\n') };
+    } },
+  { type: 'rag_retrieve', label: 'RAG Retrieve', color: '#2ea043', category: 'memory', inputs: ['query'], outputs: ['text', 'sources'],
+    fields: [{ key: 'scope', label: 'Collections', kind: 'select', options: ['character + global', 'character', 'global'] },
+      { key: 'method', label: 'Method', kind: 'select', options: ['hybrid', 'embeddings', 'keyword'], help: 'Embeddings use KoboldCPP /v1/embeddings (cached per chunk); on error it falls back to keyword (BM25). Hybrid = 0.7 cosine + 0.3 normalized BM25.' },
+      { key: 'history', label: 'Add last N earlier messages to the query', kind: 'number' },
+      { key: 'topK', label: 'Top K', kind: 'number' }, { key: 'minScore', label: 'Min score', kind: 'number' },
+      { key: 'budget', label: 'Token budget (0 = unlimited)', kind: 'number' },
+      { key: 'header', label: 'Header', kind: 'text' }, { key: 'joiner', label: 'Join with', kind: 'text' }],
+    defaults: { scope: 'character + global', method: 'hybrid', history: 0, topK: 4, minScore: 0, budget: 600, header: '[Reference]', joiner: '\\n\\n' },
+    run: async (i, c, env) => {
+      const q = 'query' in i ? str(i.query) : lastUser(env.ctx.history); const n = Number(c.history) || 0;
+      const prev = n > 0 ? env.ctx.history.filter((m) => m.role !== 'system').slice(0, -1).slice(-n).map((m) => m.content) : [];
+      const r = await retrieve([...prev, q].join('\n'), env.ctx.memNs, { scope: String(c.scope), method: String(c.method), topK: Number(c.topK) || 4, minScore: Number(c.minScore) || 0,
+        budget: Number(c.budget) || 0, header: String(c.header ?? ''), joiner: String(c.joiner ?? '\n\n').replace(/\\n/g, '\n') },
+        env.dryRun ? null : (t) => kobold.embeddings(env.ctx.settings.koboldUrl, t, env.ctx.signal));
+      return { text: r.text, sources: r.hits.map((h) => `${h.included ? '✓' : '✗'} ${h.doc} #${h.chunk + 1} (${h.source}) ${h.score.toFixed(3)}${h.included ? '' : ' over budget'}`).join('\n'),
+        _method: r.method, ...(r.note ? { _note: r.note } : {}) };
     } },
   { type: 'merge', label: 'Merge', color: '#a371f7', category: 'logic', inputs: ['a', 'b'], outputs: ['text'],
     fields: [{ key: 'text', label: 'Template ({{a}} {{b}} {{user}} {{system}} {{char}} {{greeting}})', kind: 'textarea' }], defaults: { text: '{{a}}\n\n{{b}}' },

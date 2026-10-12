@@ -3,11 +3,13 @@ import type { Graph } from './graph/types';
 import { EXAMPLE_GRAPHS } from './graph/defaults';
 import { listStores } from './graph/memory';
 import { ProfilePanel } from './ProfilePanel';
+import { CollectionsPanel, LorebookPanel } from './Knowledge';
+import { saveLore } from './graph/lore';
 import { blankCharacter, characterFromJson, characterFromPng, exportCharacter, newCharId, resizeImage, type Character } from './charData';
 
 interface Props {
   characters: Character[]; setCharacters: (f: (c: Character[]) => Character[]) => void;
-  currentGraph: Graph; onStartChat: (charId: string) => void; onClose: () => void; activeCharId?: string;
+  currentGraph: Graph; onStartChat: (charId: string) => void; onClose: () => void; activeCharId?: string; koboldUrl: string;
 }
 
 export function Avatar({ c, size = 32 }: { c?: Character | null; size?: number }) {
@@ -20,7 +22,7 @@ const download = (name: string, text: string) => {
   a.download = name.replace(/\W+/g, '-') + '.json'; a.click();
 };
 
-export function CharacterLibrary({ characters, setCharacters, currentGraph, onStartChat, onClose, activeCharId }: Props) {
+export function CharacterLibrary({ characters, setCharacters, currentGraph, onStartChat, onClose, activeCharId, koboldUrl }: Props) {
   const [editing, setEditing] = useState<Character | null>(null);
   const [msg, setMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null), avRef = useRef<HTMLInputElement>(null);
@@ -30,7 +32,9 @@ export function CharacterLibrary({ characters, setCharacters, currentGraph, onSt
       let c: Character;
       if (f.type === 'image/png' || /\.png$/i.test(f.name)) { c = characterFromPng(new Uint8Array(await f.arrayBuffer())); c.avatar = await resizeImage(f); }
       else c = characterFromJson(JSON.parse(await f.text()));
-      setCharacters((cs) => [...cs, c]); setMsg('Imported ' + c.name); setEditing(c);
+      const book = c.lorebook; delete c.lorebook;
+      if (book?.length) saveLore(book, c.id);
+      setCharacters((cs) => [...cs, c]); setMsg('Imported ' + c.name + (book?.length ? ` with ${book.length} lorebook entries` : '')); setEditing(c);
     } catch (e) { setMsg('Import failed: ' + (e as Error).message); }
   }
   function save() {
@@ -98,6 +102,8 @@ export function CharacterLibrary({ characters, setCharacters, currentGraph, onSt
             </select></label>
           <div className="muted">Memory stores for this character: {listStores(editing.id).join(', ') || 'none yet'} (kept separate from other characters).</div>
           <details className="profwrap"><summary>Dynamic profile (fields, values, history)</summary><ProfilePanel ns={editing.id} label={editing.name} /></details>
+          <details className="profwrap"><summary>Lorebook (keyword world info)</summary><LorebookPanel key={editing.id} ns={editing.id} label={editing.name} /></details>
+          <details className="profwrap"><summary>Documents (RAG collection)</summary><CollectionsPanel key={editing.id} ns={editing.id} label={editing.name} koboldUrl={koboldUrl} /></details>
           <div className="row"><button className="primary" onClick={save}>Save</button><button onClick={() => setEditing(null)}>Cancel</button></div>
         </section>)}
     </>

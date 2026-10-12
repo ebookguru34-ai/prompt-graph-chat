@@ -1,6 +1,7 @@
 import type { Graph } from './graph/types';
 import { CHAR_NS_PREFIX } from './graph/memory';
 import { uid } from './storage';
+import { loadLore, parseLorebook, type LoreEntry } from './graph/lore';
 
 export interface Character {
   id: string;            // starts with "char-"; also the memory namespace
@@ -12,6 +13,8 @@ export interface Character {
   voice?: string;        // TTS voice override (blank = global voice)
   graph?: Graph | null;  // default graph for this character's chats (null/undefined = current editor graph)
   updatedAt: number;
+  /** Only set right after import (card character_book / our export); the library saves it to pgc.lore.<id>. */
+  lorebook?: LoreEntry[];
 }
 
 export const newCharId = () => CHAR_NS_PREFIX + uid();
@@ -30,7 +33,8 @@ export function characterSystemPrompt(c: Character, userName: string) {
 
 // ---------- import / export ----------
 export const EXPORT_SPEC = 'pgc_character_v1';
-export function exportCharacter(c: Character) { return JSON.stringify({ spec: EXPORT_SPEC, ...c }, null, 2); }
+export function exportCharacter(c: Character) { return JSON.stringify({ spec: EXPORT_SPEC, ...c, lorebook: loadLore(c.id) }, null, 2); }
+const bookOf = (o: unknown): LoreEntry[] | undefined => { try { const e = parseLorebook(o); return e.length ? e : undefined; } catch { return undefined; } };
 
 type Card = Record<string, unknown>;
 const s = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -42,7 +46,7 @@ export function characterFromJson(obj: unknown): Character {
   if (o.spec === EXPORT_SPEC) {
     if (!s(o.name)) throw new Error('Character has no name');
     return { ...blankCharacter(), name: s(o.name), avatar: s(o.avatar) || undefined, system: s(o.system), greeting: s(o.greeting), examples: s(o.examples), voice: s(o.voice) || undefined,
-      graph: o.graph && typeof o.graph === 'object' ? o.graph as Graph : null };
+      graph: o.graph && typeof o.graph === 'object' ? o.graph as Graph : null, lorebook: Array.isArray(o.lorebook) ? bookOf({ entries: o.lorebook }) : undefined };
   }
   const d = (o.data && typeof o.data === 'object' ? o.data : o) as Card; // V2/V3 keep fields under data
   const name = s(d.name) || s(o.name) || s(o.char_name);
@@ -50,7 +54,7 @@ export function characterFromJson(obj: unknown): Character {
   const parts = [s(d.system_prompt), s(d.description) || s(o.char_persona),
     s(d.personality) && `Personality: ${s(d.personality)}`, s(d.scenario) || s(o.world_scenario) ? `Scenario: ${s(d.scenario) || s(o.world_scenario)}` : '']
     .map((x) => (x || '').trim()).filter(Boolean);
-  return { ...blankCharacter(), name, system: parts.join('\n\n'), greeting: s(d.first_mes) || s(o.char_greeting), examples: s(d.mes_example) || s(o.example_dialogue) };
+  return { ...blankCharacter(), name, system: parts.join('\n\n'), greeting: s(d.first_mes) || s(o.char_greeting), examples: s(d.mes_example) || s(o.example_dialogue), lorebook: d.character_book ? bookOf({ data: d }) : undefined };
 }
 
 const b64ToUtf8 = (b64: string) => { const bin = atob(b64.trim()); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new TextDecoder().decode(u); };

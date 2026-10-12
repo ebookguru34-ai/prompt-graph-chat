@@ -158,3 +158,18 @@ button.icon{padding:4px 10px;min-width:36px}button.icon.on{border-color:var(--ac
 .trigger.now{border-style:dashed}
 .toast{margin:6px 16px 0;padding:6px 10px;border-radius:6px;background:#1d3a24;border:1px solid var(--ok);color:#b7f0c2;font-size:13px;cursor:pointer}
 @media (max-width:768px){.triggerbar{padding:6px 8px 0}.trigger{min-height:34px}.toast{margin:6px 8px 0}}
+/* lorebook + documents */
+.lore{display:flex;flex-direction:column;gap:8px}
+.lore h4{margin:4px 0}
+.lorelist{display:flex;flex-direction:column;gap:6px}
+.loreitem{border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:var(--bg)}
+.loreitem.off{opacity:.55}
+.lorehead{display:flex;align-items:center;gap:8px;cursor:pointer;flex-wrap:nowrap;min-width:0}
+.lorehead .keys{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.loreform{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.tag{font-size:11px;padding:1px 6px;border-radius:9px;background:var(--accent,#6c8cff);color:#fff}
+.row.wrap{flex-wrap:wrap}
+.seg.small button{padding:4px 10px}
+@media (max-width:768px){.knowledge.drawer.open{display:flex}}
+.lorehead input[type=checkbox]{width:auto;min-height:0;flex:none;margin:0;display:inline-block}
+.lorehead b{white-space:nowrap}

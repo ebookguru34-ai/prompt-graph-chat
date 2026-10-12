@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { usePanel } from '../ui';
 import { ProfilePanel } from '../ProfilePanel';
+import { LorebookPanel } from '../Knowledge';
 import type { Graph, GraphNode, NodeTrace } from './types';
 import { DEF, NODE_DEFS, readMem, writeMem, listStores } from './nodes';
 import { EXAMPLE_GRAPHS } from './defaults';
@@ -181,6 +182,8 @@ export function Editor({ graph, setGraph, trace, onTestRun, busy, mobile = false
                 <button onClick={() => { writeMem(store, [], memNs); force((x) => x + 1); }}>Clear store</button>
                 <div className="muted">All stores: {listStores(memNs).join(', ') || 'none'}</div></div>);
             })()}
+            {node.type === 'lorebook' && <><LorebookPanel key={'c' + (memNs || '')} ns={memNs} label={memLabel || 'no character'} />{memNs && <LorebookPanel key="g" label="global" />}</>}
+            {node.type === 'rag_retrieve' && <div className="muted">Manage documents in 📚 Knowledge (global) or the character editor (per character).</div>}
             {['profile', 'profile_update', 'stats', 'compare'].includes(node.type) && <ProfilePanel key={(memNs || '') + trace.length} ns={memNs} label={memLabel || 'no character (global)'} />}
             <button className="danger" onClick={() => del(node.id)}>Delete node</button>
             <h4>Last run</h4>

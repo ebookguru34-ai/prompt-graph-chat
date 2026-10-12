@@ -12,6 +12,7 @@ import type { Graph, NodeTrace } from './graph/types';
 import { useIsMobile, usePanel } from './ui';
 import { DEFAULT_TTS, SentenceStreamer, TtsPlayer, cleanForSpeech, splitSentences, type TtsSettings } from './tts';
 import { TtsPanel } from './TtsPanel';
+import { KnowledgeDrawer } from './Knowledge';
 import { CharacterLibrary, Avatar } from './Characters';
 import { characterSystemPrompt, substChar, type Character } from './charData';
 
@@ -46,12 +47,13 @@ export default function App() {
   const [sysOpen, setSysOpen] = useState<boolean>(() => load('sysOpen', true));
   useEffect(() => { save('sysOpen', sysOpen); }, [sysOpen]);
   const [libOpen, setLibOpen] = usePanel('library', mobile, false);
+  const [kbOpen, setKbOpen] = usePanel('knowledge', mobile, false);
   const [picking, setPicking] = useState(false);
   const [characters, setCharactersState] = useState<Character[]>(() => load('characters', []));
   const setCharacters = (f: (c: Character[]) => Character[]) => setCharactersState(f);
   useEffect(() => { save('characters', characters); }, [characters]);
-  const closeDrawers = () => { setChatsOpen(false); setRightOpen(false); setLibOpen(false); };
-  const only = (which: 'chats' | 'right' | 'lib') => { if (!mobile) return; if (which !== 'chats') setChatsOpen(false); if (which !== 'right') setRightOpen(false); if (which !== 'lib') setLibOpen(false); };
+  const closeDrawers = () => { setChatsOpen(false); setRightOpen(false); setLibOpen(false); setKbOpen(false); };
+  const only = (which: 'chats' | 'right' | 'lib' | 'kb') => { if (!mobile) return; if (which !== 'chats') setChatsOpen(false); if (which !== 'right') setRightOpen(false); if (which !== 'lib') setLibOpen(false); if (which !== 'kb') setKbOpen(false); };
   const [tts, setTtsState] = useState<TtsSettings>(() => ({ ...DEFAULT_TTS, ...load('tts', DEFAULT_TTS) }));
   const setTts = (f: (t: TtsSettings) => TtsSettings) => setTtsState(f);
   useEffect(() => { save('tts', tts); }, [tts]);
@@ -229,6 +231,8 @@ export default function App() {
         onClick={() => { only('chats'); setChatsOpen((o) => !o); }}>☰</button>}
       {view === 'chat' && <button className={'icon' + (libOpen ? ' on' : '')} title={(libOpen ? 'Hide' : 'Show') + ' character library'} aria-label="Toggle character library"
         onClick={() => { only('lib'); setLibOpen((o) => !o); }}>🎭</button>}
+      {view === 'chat' && <button className={'icon' + (kbOpen ? ' on' : '')} title={(kbOpen ? 'Hide' : 'Show') + ' global lorebook & documents'} aria-label="Toggle knowledge panel"
+        onClick={() => { only('kb'); setKbOpen((o) => !o); }}>📚</button>}
       <span className="title">Prompt Graph Chat</span>
       <div className="seg">
         <button className={view === 'chat' ? 'active' : ''} onClick={() => { setView('chat'); }}>💬<span className="lbl"> Chat</span></button>
@@ -242,7 +246,7 @@ export default function App() {
     {view === 'editor' && <Editor memNs={activeChar?.id} memLabel={activeChar?.name} mobile={mobile} graph={graph} setGraph={setGraph} trace={nodeTrace} busy={busy} onTestRun={(t) => send(t)} />}
     {view === 'editor' && error && <div className="error">⚠ {error}</div>}
     <div className={'app' + (mobile ? ' mobile' : '')} style={view === 'chat' ? undefined : { display: 'none' }}>
-      {mobile && (chatsOpen || rightOpen || libOpen) && <div className="backdrop" onClick={closeDrawers} />}
+      {mobile && (chatsOpen || rightOpen || libOpen || kbOpen) && <div className="backdrop" onClick={closeDrawers} />}
       <aside className={'sidebar drawer left' + (chatsOpen ? ' open' : ' closed')}>
         <div className="panelhead"><b>Chats</b><button className="icon x" title="Hide" onClick={() => setChatsOpen(false)}>✕</button></div>
         <button className="primary" onClick={() => { if (characters.length) setPicking((p) => !p); else startChat(); }}>+ New chat</button>
@@ -264,7 +268,11 @@ export default function App() {
 
       <aside className={'library drawer left' + (libOpen ? ' open' : ' closed')}>
         <CharacterLibrary characters={characters} setCharacters={setCharacters} currentGraph={graph} activeCharId={activeChar?.id}
-          onStartChat={(id) => startChat(id)} onClose={() => setLibOpen(false)} />
+          onStartChat={(id) => startChat(id)} onClose={() => setLibOpen(false)} koboldUrl={settings.koboldUrl} />
+      </aside>
+
+      <aside className={'library knowledge drawer left' + (kbOpen ? ' open' : ' closed')}>
+        {kbOpen && <KnowledgeDrawer onClose={() => setKbOpen(false)} koboldUrl={settings.koboldUrl} />}
       </aside>
 
       <main className="main">

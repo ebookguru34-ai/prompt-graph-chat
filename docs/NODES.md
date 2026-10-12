@@ -201,6 +201,27 @@ Each character has a **profile**: fields you define, their current values, and a
 - **Config:** dot paths (one per line), fallback
 - Finds the first JSON object in the text, using the same forgiving parser as Profile Update (it strips `<think>` and code fences). A missing path, or no JSON at all, gives the fallback.
 
+### Lorebook
+- **Inputs:** `text` (optional, scanned together with the chat)
+- **Outputs:** `text` (matched entries under the header), `fired` (one line per matched entry: ✓ included / ✗ over budget, with the reason)
+- **Config:** books (`character + global`, `character`, `global`), scan last N messages (default 4), token budget (default 500, 0 = unlimited), header (default `[World info]`), joiner
+- Keyword world info. The node scans the last N chat messages, plus the wired text, against every enabled entry of the active character's lorebook and the global lorebook. An entry fires when any of its keys appears, or always when it's **always on**.
+  - Keys are case-insensitive unless the entry is case-sensitive.
+  - **Whole word** (the default) means `sword` doesn't fire on `swords`.
+  - A key written `/like this/i` is a regex.
+- Matched entries are sorted by **priority** (high first; ties keep book order, character before global). They're added while the joined text fits the token budget; an entry that doesn't fit is skipped and the next one is tried.
+- Edit books in 📚 **Knowledge** (global) and in the character editor (per character).
+
+### RAG Retrieve
+- **Inputs:** `query` (optional; defaults to the latest user message)
+- **Outputs:** `text` (best chunks under the header), `sources` (`✓ doc #chunk (scope) score` per hit)
+- **Config:** collections (`character + global`, `character`, `global`), method (`hybrid`, `embeddings`, `keyword`), add last N earlier messages to the query, top K (4), min score (0), token budget (600), header (`[Reference]`), joiner
+- Semantic search over document collections.
+  - **Embeddings:** chunks are embedded with KoboldCPP's `/v1/embeddings` (through the proxy; load an embeddings model). Vectors are cached per chunk text hash (`pgc.emb.*`).
+  - **Hybrid** (default): `0.7 × cosine + 0.3 × BM25 / best BM25`.
+  - **Keyword:** BM25 only. If embeddings fail (no model loaded), the node falls back to keyword automatically and notes it in the trace. Dry runs always use keyword.
+- Hits below the min score are dropped. Top K are added while they fit the budget. With keyword search, the min score applies to raw BM25 scores, which aren't 0–1.
+
 ## Recipe: subconscious, then speaker
 
 ```
@@ -220,6 +241,21 @@ The 🎭 library holds roleplay characters. Each one has a name, an optional ava
 - **Greeting.** A new chat with a character starts with the greeting as the first assistant message.
 - **Default graph.** If the character has a default graph (an example graph or a saved copy of an editor graph), its chats run that graph instead of the one in the editor.
 - **Import/export.** Export saves our own JSON. Import accepts our JSON and SillyTavern/TavernAI cards: JSON (V1 fields, or V2/V3 with `data{...}`) and PNG cards (a `chara` or `ccv3` text chunk). Description, personality and scenario go into the system prompt, `first_mes` becomes the greeting, `mes_example` becomes the example dialogue, and the PNG becomes the avatar.
+
+## Knowledge: lorebooks and documents
+The 📚 button in the chat view opens the **global** lorebook and document collection, which are used in every chat. Each character also has its own lorebook and documents in the character editor. Storage keys: `pgc.lore.<charId|_global>` and `pgc.rag.<charId|_global>`.
+
+- **Lorebook entries:** title, keys, content, enabled, always on, priority, case-sensitive, whole word.
+  - **Import:** SillyTavern world info JSON, or a V2/V3 card JSON with `character_book`.
+  - **Export:** SillyTavern world info JSON.
+  - Importing a character card (JSON or PNG) also imports its `character_book` into that character's lorebook, and our character export includes the lorebook.
+  - The editor has a test box that shows which entries fire for a piece of text.
+- **Documents:** import `.txt` / `.md` files or paste text.
+  - Chunking: text is split into chunks at markdown headings and paragraphs, packed up to the chunk size (default 800 chars), and long paragraphs are split by sentence. Each chunk carries an overlap (default 100 chars) of the previous one, plus its section heading.
+  - The list shows chunks and embedded counts per document, with **Embed all**, **Re-embed** (drops cached vectors first), **Delete** and a chunk preview.
+
+## Example graph: Lorebook + RAG
+Lorebook (last 4 messages) and RAG Retrieve (hybrid, the user's message plus the previous message) → Merge → Chat Prompt `memory` (header blank, since both nodes add their own). System Prompt and the history feed Chat Prompt as usual → Generate → Chat Output.
 
 ## Example graph: Dynamic profile
 Chat Input → Chat Prompt. System Prompt + Profile → Merge → Chat Prompt `system`. Chat Prompt → Generate → Chat Output. Generate's reply plus the user's message → Profile Update. Load it from *Load example* in the editor, then add fields (or click *Add example fields*) in the character's profile.

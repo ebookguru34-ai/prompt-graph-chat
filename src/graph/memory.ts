@@ -3,8 +3,8 @@
  *  `turn` = id of the assistant reply being generated when the entry was written.
  *  `prev` (replace mode only) = the store's entries before the replace, restored on rollback. */
 export interface MemEntry { text: string; turn?: string; prev?: MemEntry[]; }
-type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; keys(): string[] };
-const ls = (): KV => ({ getItem: (k) => localStorage.getItem(k), setItem: (k, v) => localStorage.setItem(k, v), keys: () => Object.keys(localStorage) });
+type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; keys(): string[]; removeItem?(k: string): void };
+const ls = (): KV => ({ getItem: (k) => localStorage.getItem(k), setItem: (k, v) => localStorage.setItem(k, v), keys: () => Object.keys(localStorage), removeItem: (k) => localStorage.removeItem(k) });
 let kv: () => KV = ls;
 /** Shared key-value backend (localStorage, or a test double via setMemStorage). */
 export const storage = (): KV => kv();
