@@ -3,3 +3,6 @@ dist/
 logs/
 *.tsbuildinfo
 .env
+# knowledge packs are installed locally, never committed
+*.pack.json
+*.pack.zip

@@ -3,7 +3,7 @@ import type { Graph } from './graph/types';
 import { EXAMPLE_GRAPHS } from './graph/defaults';
 import { listStores } from './graph/memory';
 import { ProfilePanel } from './ProfilePanel';
-import { CollectionsPanel, LorebookPanel } from './Knowledge';
+import { CharPackOverrides, CollectionsPanel, LorebookPanel } from './Knowledge';
 import { saveLore } from './graph/lore';
 import { blankCharacter, characterFromJson, characterFromPng, exportCharacter, newCharId, resizeImage, type Character } from './charData';
 
@@ -104,6 +104,7 @@ export function CharacterLibrary({ characters, setCharacters, currentGraph, onSt
           <details className="profwrap"><summary>Dynamic profile (fields, values, history)</summary><ProfilePanel ns={editing.id} label={editing.name} /></details>
           <details className="profwrap"><summary>Lorebook (keyword world info)</summary><LorebookPanel key={editing.id} ns={editing.id} label={editing.name} /></details>
           <details className="profwrap"><summary>Documents (RAG collection)</summary><CollectionsPanel key={editing.id} ns={editing.id} label={editing.name} koboldUrl={koboldUrl} /></details>
+          <details className="profwrap"><summary>Knowledge packs</summary><CharPackOverrides key={editing.id} ns={editing.id} /></details>
           <div className="row"><button className="primary" onClick={save}>Save</button><button onClick={() => setEditing(null)}>Cancel</button></div>
         </section>)}
     </>

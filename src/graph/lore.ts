@@ -1,6 +1,7 @@
 // Lorebooks (keyword world info): per character (pgc.lore.<charId>) and global (pgc.lore._global).
 import { storage } from './memory';
 import { estimateTokens } from '../pipeline';
+import { packLore, type PackSel } from './packs';
 
 export interface LoreEntry {
   id: string; title: string; keys: string[]; content: string;
@@ -66,11 +67,13 @@ export function keyMatches(key: string, text: string, caseSensitive: boolean, wh
   return caseSensitive ? text.includes(key) : text.toLowerCase().includes(key.toLowerCase());
 }
 
-export interface ScanOpts { scope: string; depth: number; budget: number; header: string; joiner: string; }
+export interface ScanOpts { scope: string; depth: number; budget: number; header: string; joiner: string;
+  /** Knowledge packs to include (omitted = none). */ packs?: PackSel; level?: string; }
 /** Scan text against character + global books. Matched entries are sorted by priority (high first) and added while they fit the token budget. */
 export function scanLore(text: string, memNs: string | undefined, o: ScanOpts): { text: string; fired: LoreFired[] } {
   const wantChar = o.scope !== 'global', wantGlobal = o.scope !== 'character';
-  const all = [...(wantChar && memNs ? loadLore(memNs).map((e) => ({ e, source: 'character' })) : []), ...(wantGlobal ? loadLore().map((e) => ({ e, source: 'global' })) : [])];
+  const all = [...(wantChar && memNs ? loadLore(memNs).map((e) => ({ e, source: 'character' })) : []), ...(wantGlobal ? loadLore().map((e) => ({ e, source: 'global' })) : []),
+    ...(o.packs ? packLore(memNs, o.packs, o.level) : [])];
   const hits: { e: LoreEntry; source: string; reason: string; i: number }[] = [];
   all.forEach(({ e, source }, i) => {
     if (!e.enabled || !e.content.trim()) return;

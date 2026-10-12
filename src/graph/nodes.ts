@@ -25,6 +25,7 @@ import { readMem, writeMem, listStores, appendMem } from './memory';
 export { readMem, writeMem, listStores };
 import { bm25Rank, embeddingRank, everyFires, turnNumber } from './search';
 import { scanLore } from './lore';
+import { parseSel } from './packs';
 import { retrieve } from './rag';
 import { estimateTokens as estTok } from '../pipeline';
 import { loadProfile, profileLines, getPath, fieldValue, fmt, validatePatch, commit, parsePatchText, updateInstruction, applyTick } from './profile';
@@ -253,12 +254,16 @@ export const NODE_DEFS: NodeDef[] = [
     fields: [{ key: 'scope', label: 'Books', kind: 'select', options: ['character + global', 'character', 'global'] },
       { key: 'depth', label: 'Scan last N messages', kind: 'number', help: 'Plus the wired text input, if any.' },
       { key: 'budget', label: 'Token budget (0 = unlimited)', kind: 'number' },
-      { key: 'header', label: 'Header', kind: 'text' }, { key: 'joiner', label: 'Join with', kind: 'text' }],
-    defaults: { scope: 'character + global', depth: 4, budget: 500, header: '[World info]', joiner: '\\n\\n' },
+      { key: 'header', label: 'Header', kind: 'text' }, { key: 'joiner', label: 'Join with', kind: 'text' },
+      { key: 'packs', label: 'Knowledge packs', kind: 'select', options: ['all enabled', 'none', 'selected'], help: 'Installed packs (Knowledge → Packs) that are on for this chat. "none" = this node never uses packs.' },
+      { key: 'packIds', label: 'Pack ids (for "selected", comma separated)', kind: 'text' },
+      { key: 'knowledge', label: 'Pack knowledge level', kind: 'select', options: ['basic', 'advanced'], help: 'basic = what an ordinary person knows; advanced = the specialist text (Oghma basic vs advanced).' }],
+    defaults: { packs: 'all enabled', packIds: '', knowledge: 'basic', scope: 'character + global', depth: 4, budget: 500, header: '[World info]', joiner: '\\n\\n' },
     run: (i, c, env) => {
       const depth = Number(c.depth) || 0; const msgs = env.ctx.history.filter((m) => m.role !== 'system');
       const scan = [...(depth > 0 ? msgs.slice(-depth).map((m) => m.content) : []), ...('text' in i ? [str(i.text)] : [])].join('\n');
-      const r = scanLore(scan, env.ctx.memNs, { scope: String(c.scope), depth, budget: Number(c.budget) || 0, header: String(c.header ?? ''), joiner: String(c.joiner ?? '\n\n').replace(/\\n/g, '\n') });
+      const r = scanLore(scan, env.ctx.memNs, { scope: String(c.scope), depth, budget: Number(c.budget) || 0, header: String(c.header ?? ''), joiner: String(c.joiner ?? '\n\n').replace(/\\n/g, '\n'),
+        packs: parseSel(c.packs, c.packIds), level: String(c.knowledge ?? 'basic') });
       return { text: r.text, fired: r.fired.map((f) => `${f.included ? '✓' : '✗'} ${f.title} (${f.source}): ${f.reason}, ~${f.tokens} tok`).join('\n') };
     } },
   { type: 'rag_retrieve', label: 'RAG Retrieve', color: '#2ea043', category: 'memory', inputs: ['query'], outputs: ['text', 'sources'],
@@ -267,13 +272,17 @@ export const NODE_DEFS: NodeDef[] = [
       { key: 'history', label: 'Add last N earlier messages to the query', kind: 'number' },
       { key: 'topK', label: 'Top K', kind: 'number' }, { key: 'minScore', label: 'Min score', kind: 'number' },
       { key: 'budget', label: 'Token budget (0 = unlimited)', kind: 'number' },
-      { key: 'header', label: 'Header', kind: 'text' }, { key: 'joiner', label: 'Join with', kind: 'text' }],
-    defaults: { scope: 'character + global', method: 'hybrid', history: 0, topK: 4, minScore: 0, budget: 600, header: '[Reference]', joiner: '\\n\\n' },
+      { key: 'header', label: 'Header', kind: 'text' }, { key: 'joiner', label: 'Join with', kind: 'text' },
+      { key: 'packs', label: 'Knowledge packs', kind: 'select', options: ['all enabled', 'none', 'selected'], help: 'Installed packs (Knowledge → Packs) that are on for this chat. "none" = this node never uses packs.' },
+      { key: 'packIds', label: 'Pack ids (for "selected", comma separated)', kind: 'text' },
+      { key: 'knowledge', label: 'Pack knowledge level', kind: 'select', options: ['basic', 'advanced'], help: 'basic = what an ordinary person knows; advanced = the specialist text (Oghma basic vs advanced).' }],
+    defaults: { packs: 'all enabled', packIds: '', knowledge: 'basic', scope: 'character + global', method: 'hybrid', history: 0, topK: 4, minScore: 0, budget: 600, header: '[Reference]', joiner: '\\n\\n' },
     run: async (i, c, env) => {
       const q = 'query' in i ? str(i.query) : lastUser(env.ctx.history); const n = Number(c.history) || 0;
       const prev = n > 0 ? env.ctx.history.filter((m) => m.role !== 'system').slice(0, -1).slice(-n).map((m) => m.content) : [];
       const r = await retrieve([...prev, q].join('\n'), env.ctx.memNs, { scope: String(c.scope), method: String(c.method), topK: Number(c.topK) || 4, minScore: Number(c.minScore) || 0,
-        budget: Number(c.budget) || 0, header: String(c.header ?? ''), joiner: String(c.joiner ?? '\n\n').replace(/\\n/g, '\n') },
+        budget: Number(c.budget) || 0, header: String(c.header ?? ''), joiner: String(c.joiner ?? '\n\n').replace(/\\n/g, '\n'),
+        packs: parseSel(c.packs, c.packIds), level: String(c.knowledge ?? 'basic') },
         env.dryRun ? null : (t) => kobold.embeddings(env.ctx.settings.koboldUrl, t, env.ctx.signal));
       return { text: r.text, sources: r.hits.map((h) => `${h.included ? '✓' : '✗'} ${h.doc} #${h.chunk + 1} (${h.source}) ${h.score.toFixed(3)}${h.included ? '' : ' over budget'}`).join('\n'),
         _method: r.method, ...(r.note ? { _note: r.note } : {}) };

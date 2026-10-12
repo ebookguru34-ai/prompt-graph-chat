@@ -211,6 +211,8 @@ Each character has a **profile**: fields you define, their current values, and a
   - A key written `/like this/i` is a regex.
 - Matched entries are sorted by **priority** (high first; ties keep book order, character before global). They're added while the joined text fits the token budget; an entry that doesn't fit is skipped and the next one is tried.
 - Edit books in 📚 **Knowledge** (global) and in the character editor (per character).
+- **Knowledge packs:** pack (`all enabled`, `none`, `selected` + comma-separated pack ids) and pack knowledge level (`basic`, `advanced`). See [Knowledge packs](#knowledge-packs). With `none`, or with no pack on, the node behaves exactly as without packs.
+  - Pack articles fire on their title, aliases and retrieval phrases (case-insensitive, whole word) at priority 50, below the default 100 of your own entries, so your lore wins the budget. `fired` shows them as `(pack:<id>)`.
 
 ### RAG Retrieve
 - **Inputs:** `query` (optional; defaults to the latest user message)
@@ -221,6 +223,9 @@ Each character has a **profile**: fields you define, their current values, and a
   - **Hybrid** (default): `0.7 × cosine + 0.3 × BM25 / best BM25`.
   - **Keyword:** BM25 only. If embeddings fail (no model loaded), the node falls back to keyword automatically and notes it in the trace. Dry runs always use keyword.
 - Hits below the min score are dropped. Top K are added while they fit the budget. With keyword search, the min score applies to raw BM25 scores, which aren't 0–1.
+- **Knowledge packs:** pack (`all enabled`, `none`, `selected` + comma-separated pack ids) and pack knowledge level (`basic`, `advanced`). See [Knowledge packs](#knowledge-packs). With `none`, or with no pack on, the node behaves exactly as without packs.
+  - Each pack article is one chunk. It is scored on title + keys + text and injects only the text. Its vector comes from `title + aliases + basic text` and is cached per article checksum.
+  - Missing pack vectors: if up to 64 articles lack vectors they are embedded on the fly; otherwise those articles score by keyword only (cosine 0) and the trace notes it. Embed the pack in Knowledge → Packs first.
 
 ## Recipe: subconscious, then speaker
 
@@ -262,3 +267,16 @@ Chat Input → Chat Prompt. System Prompt + Profile → Merge → Chat Prompt `s
 
 ## Example graph: Long chat: rolling summary + recall
 Every user message is saved to `notes` (Memory Write). Every 5 turns, **Every N** passes the history to **Summarize**, which, once the chat is over about 600 tokens, writes a summary to the `summary` store. Each reply's system prompt (Text Template) combines the system prompt, the latest summary (Memory Read, last 1), and the notes most relevant to the new message (**Memory Search**, keyword, top 3).
+
+## Knowledge packs
+Read-only lore sets you install, separate from your own lorebooks and documents. Example: the Skyrim **Oghma Infinium** catalog from CHIM / HerikaServer (1,562 articles), built with `tools/oghma_to_pack.py` from the graph compiler repo.
+
+- **Install:** 📚 Knowledge → 📦 Packs → *Install pack…* (a `pgc-knowledge-pack` `.json`, or a `.zip` containing one). Installing a pack with the same id replaces it. Pack data and vectors are stored in IndexedDB (`pgc-packs`), not localStorage.
+- **On / off:** each pack has a global toggle (on after install). In the character editor, *Knowledge packs* sets a per-character override: `inherit`, `on` or `off`.
+- **Categories:** checkboxes per category with entry counts, grouped by topic type (books, figures & gods, spells, items, armor & weapons, artifacts, creatures), locations (one per hold, plus Solstheim and other) and knowledge tier (general vs esoteric). An article is used only if all its categories are on.
+- **Knowledge level** is a node option. `basic` uses what an ordinary person knows (Oghma `topic_desc_basic`); `advanced` uses the specialist text (`topic_desc`).
+- **Embed:** computes vectors for RAG through KoboldCPP, with a progress bar and *Cancel*. It resumes where it stopped, and only missing checksums are embedded. *Re-embed* starts over.
+- **Browse:** search titles, keys and tags; click an article for its basic and advanced text. *License & attribution* shows the pack's source, license notice and full license text.
+- **Uninstall** removes the pack data, its vectors, its settings and every character override for it.
+- **Off means off.** A pack that is off, deselected by the node (`packs: none`), overridden off for the character, or has all its categories off adds nothing. It doesn't fire lore, doesn't join the RAG corpus (so it doesn't shift BM25 scores) and makes no embedding calls.
+- Settings keys: `pgc.packs.settings` (`{id: {enabled, cats}}`) and `pgc.packs.char.<charId>` (`{id: "on"|"off"}`).
