@@ -1,0 +1,67 @@
+import type { Graph } from './types';
+/** Same behavior as the original fixed chat pipeline. */
+export const DEFAULT_GRAPH: Graph = { version: 1, name: 'Basic chat', nodes: [
+  { id: 'in', type: 'chat_input', x: 40, y: 140, config: {} },
+  { id: 'sys', type: 'system_prompt', x: 40, y: 20, config: {} },
+  { id: 'cp', type: 'chat_prompt', x: 300, y: 60, config: {} },
+  { id: 'gen', type: 'generate', x: 560, y: 80, config: { stream: true } },
+  { id: 'out', type: 'chat_output', x: 820, y: 100, config: {} },
+], edges: [
+  { id: 'e1', from: 'sys', fromPort: 'text', to: 'cp', toPort: 'system' },
+  { id: 'e2', from: 'in', fromPort: 'history', to: 'cp', toPort: 'history' },
+  { id: 'e3', from: 'cp', fromPort: 'prompt', to: 'gen', toPort: 'prompt' },
+  { id: 'e4', from: 'gen', fromPort: 'text', to: 'out', toPort: 'text' },
+] };
+export const EXAMPLE_GRAPHS: Graph[] = [DEFAULT_GRAPH,
+  { version: 1, name: 'Draft + critic rewrite', nodes: [
+    { id: 'in', type: 'chat_input', x: 30, y: 160, config: {} },
+    { id: 'sys', type: 'system_prompt', x: 30, y: 30, config: {} },
+    { id: 'cp', type: 'chat_prompt', x: 280, y: 60, config: {} },
+    { id: 'gen', type: 'generate', x: 520, y: 40, config: { stream: false } },
+    { id: 'crit', type: 'persona', x: 760, y: 120, config: { stream: true } },
+    { id: 'out', type: 'chat_output', x: 1010, y: 160, config: {} },
+  ], edges: [
+    { id: 'e1', from: 'sys', fromPort: 'text', to: 'cp', toPort: 'system' },
+    { id: 'e2', from: 'in', fromPort: 'history', to: 'cp', toPort: 'history' },
+    { id: 'e3', from: 'cp', fromPort: 'prompt', to: 'gen', toPort: 'prompt' },
+    { id: 'e4', from: 'gen', fromPort: 'text', to: 'crit', toPort: 'text' },
+    { id: 'e5', from: 'crit', fromPort: 'text', to: 'out', toPort: 'text' },
+  ] },
+  { version: 1, name: 'Chat with memory stream', nodes: [
+    { id: 'in', type: 'chat_input', x: 30, y: 200, config: {} },
+    { id: 'sys', type: 'system_prompt', x: 30, y: 30, config: {} },
+    { id: 'mr', type: 'memory_read', x: 30, y: 330, config: { store: 'notes', lastN: 10 } },
+    { id: 'cp', type: 'chat_prompt', x: 300, y: 120, config: {} },
+    { id: 'gen', type: 'generate', x: 560, y: 120, config: { stream: true } },
+    { id: 'out', type: 'chat_output', x: 820, y: 120, config: {} },
+    { id: 'cond', type: 'condition', x: 300, y: 340, config: { pattern: 'remember|my name is|note that' } },
+    { id: 'mw', type: 'memory_write', x: 560, y: 340, config: { store: 'notes' } },
+  ], edges: [
+    { id: 'e1', from: 'sys', fromPort: 'text', to: 'cp', toPort: 'system' },
+    { id: 'e2', from: 'in', fromPort: 'history', to: 'cp', toPort: 'history' },
+    { id: 'e3', from: 'mr', fromPort: 'text', to: 'cp', toPort: 'memory' },
+    { id: 'e4', from: 'cp', fromPort: 'prompt', to: 'gen', toPort: 'prompt' },
+    { id: 'e5', from: 'gen', fromPort: 'text', to: 'out', toPort: 'text' },
+    { id: 'e6', from: 'in', fromPort: 'message', to: 'cond', toPort: 'text' },
+    { id: 'e7', from: 'cond', fromPort: 'match', to: 'mw', toPort: 'text' },
+  ] },
+  { version: 1, name: 'Dynamic profile', nodes: [
+    { id: 'in', type: 'chat_input', x: 30, y: 250, config: {} },
+    { id: 'sys', type: 'system_prompt', x: 30, y: 20, config: {} },
+    { id: 'prof', type: 'profile', x: 30, y: 120, config: {} },
+    { id: 'mg', type: 'merge', x: 290, y: 40, config: {} },
+    { id: 'cp', type: 'chat_prompt', x: 540, y: 120, config: {} },
+    { id: 'gen', type: 'generate', x: 790, y: 120, config: { stream: true } },
+    { id: 'out', type: 'chat_output', x: 1050, y: 80, config: {} },
+    { id: 'pu', type: 'profile_update', x: 1050, y: 220, config: { stream: false } },
+  ], edges: [
+    { id: 'e1', from: 'sys', fromPort: 'text', to: 'mg', toPort: 'a' },
+    { id: 'e2', from: 'prof', fromPort: 'text', to: 'mg', toPort: 'b' },
+    { id: 'e3', from: 'mg', fromPort: 'text', to: 'cp', toPort: 'system' },
+    { id: 'e4', from: 'in', fromPort: 'history', to: 'cp', toPort: 'history' },
+    { id: 'e5', from: 'cp', fromPort: 'prompt', to: 'gen', toPort: 'prompt' },
+    { id: 'e6', from: 'gen', fromPort: 'text', to: 'out', toPort: 'text' },
+    { id: 'e7', from: 'gen', fromPort: 'text', to: 'pu', toPort: 'text' },
+    { id: 'e8', from: 'in', fromPort: 'message', to: 'pu', toPort: 'context' },
+  ] },
+];
