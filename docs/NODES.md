@@ -79,6 +79,14 @@ Kobold Generate and Persona are the only nodes that call the LLM. Dry-run previe
 
 ---
 
+### Summarize (LLM)
+- **Inputs:** `text` or `history` (if neither is wired, it uses the chat history)
+- **Outputs:** `text`
+- **Config:** token threshold, target length (words), instruction (`{{text}}`, `{{target}}`, `{{char}}`, `{{user}}`), optional memory store, temperature, max length
+- If the input is at or below the threshold (estimated as chars/4), it is passed through unchanged and the LLM isn't called. Above the threshold it asks for a summary of about the target length.
+- With a store set, the summary is saved in `replace` mode, tagged with the turn, so regenerate/edit/delete restore the previous summary.
+- It never streams and is skipped in dry runs.
+
 ## Memory
 Memory stores are saved in the browser (localStorage) and keep their contents between sessions. You can view or clear a store from the inspector.
 
@@ -103,6 +111,14 @@ Memory stores are saved in the browser (localStorage) and keep their contents be
 - Each entry is tagged with the chat turn (the assistant reply) that wrote it. When you **regenerate** a reply, **delete** a message, or **edit and resend** a message, entries written by the affected turn(s), plus any later turns that get removed, are rolled back automatically before the graph runs again. In `replace` mode the previous value is restored. Entries from older versions are kept as untagged entries and never get rolled back. If "Keep at most N" has already trimmed older entries, rollback can't bring them back.
 
 ---
+
+### Memory Search
+- **Inputs:** `query` (optional; defaults to the latest user message)
+- **Outputs:** `text` (the best-matching entries joined together)
+- **Config:** store, Top K, method (`keyword` or `embeddings`), join with
+- **Keyword** uses BM25-style ranking with no extra downloads.
+- **Embeddings** calls KoboldCPP's OpenAI-compatible `/v1/embeddings` through the local proxy (load an embeddings model in KoboldCPP). Vectors are cached in the browser (`pgc.emb.<hash>`), so each entry is embedded only once. On any error it falls back to keyword, and the trace notes why. Live previews (dry runs) always use keyword.
+- It searches the active character's stores, the same as Memory Read.
 
 ## Profile (dynamic character state)
 Each character has a **profile**: fields you define, their current values, and a history of every change. It's saved at `pgc.profile.<characterId>`; chats without a character share `pgc.profile._global`. Edit it under 🎭 → Edit → *Dynamic profile*, or in the inspector when a profile node is selected.
@@ -161,6 +177,30 @@ Each character has a **profile**: fields you define, their current values, and a
 - **Config:** profile path, operator (`<` `<=` `>` `>=` `==` `!=`), value
 - Branches on a profile value, e.g. `trust.player < 20`. It compares as numbers when both sides are numeric, and as text otherwise. The unused branch is skipped, like Condition.
 
+### Every N
+- **Inputs:** `text` (optional, passed through unchanged; history works too)
+- **Outputs:** `text`, `turn`
+- **Config:** mode and its numbers:
+  - `every N turns`: fires at turns offset+N, offset+2N, …
+  - `after turn X`: fires on every turn after X
+  - `once at turn X`: fires only at turn X
+  - `between X-Y`: fires from X to Y, inclusive
+- The turn number is the number of assistant messages already in the chat plus one (a character greeting counts). It's worked out from the history, so **regenerate doesn't advance it**. When it doesn't fire, everything downstream is skipped.
+
+### Manual Trigger
+- **Inputs:** `text` (optional; defaults to the latest user message)
+- **Outputs:** `text`
+- **Config:** button label, plus a behavior:
+  - `arm for next message`: pressing the button arms it (●, highlighted) and pressing again disarms it. On the next message it lets its input through once, then disarms. When it isn't armed, its branch is skipped.
+  - `run now`: runs the graph immediately with no new user message. If a Chat Output is reached, the reply is added as an assistant message. Otherwise only memory/profile change, and a short notice appears. Those writes are tagged with the last message, so rollback still covers them.
+- Every Manual Trigger in the graph the chat runs gets a button above the message box.
+
+### JSON Extract
+- **Inputs:** `text`
+- **Outputs:** `value` (first path), `all` (`path: value` lines)
+- **Config:** dot paths (one per line), fallback
+- Finds the first JSON object in the text, using the same forgiving parser as Profile Update (it strips `<think>` and code fences). A missing path, or no JSON at all, gives the fallback.
+
 ## Recipe: subconscious, then speaker
 
 ```
@@ -183,3 +223,6 @@ The 🎭 library holds roleplay characters. Each one has a name, an optional ava
 
 ## Example graph: Dynamic profile
 Chat Input → Chat Prompt. System Prompt + Profile → Merge → Chat Prompt `system`. Chat Prompt → Generate → Chat Output. Generate's reply plus the user's message → Profile Update. Load it from *Load example* in the editor, then add fields (or click *Add example fields*) in the character's profile.
+
+## Example graph: Long chat: rolling summary + recall
+Every user message is saved to `notes` (Memory Write). Every 5 turns, **Every N** passes the history to **Summarize**, which, once the chat is over about 600 tokens, writes a summary to the `summary` store. Each reply's system prompt (Text Template) combines the system prompt, the latest summary (Memory Read, last 1), and the notes most relevant to the new message (**Memory Search**, keyword, top 3).

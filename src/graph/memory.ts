@@ -60,3 +60,9 @@ export function rollbackTurns(turnIds: string[]): number {
   }
   return changed;
 }
+
+/** Move entries tagged `from` to `to` (e.g. a "run now" pass that produced no message is re-tagged to the last message). */
+export function retagTurn(from: string, to: string | undefined) {
+  const fix = (items: MemEntry[]): MemEntry[] => items.map((e) => ({ ...e, turn: e.turn === from ? to : e.turn, ...(e.prev ? { prev: fix(e.prev) } : {}) }));
+  for (const k of kv().keys().filter((x) => x.startsWith(PREFIX))) { const b = readKey(k); if (JSON.stringify(b).includes(from)) kv().setItem(k, JSON.stringify(fix(b))); }
+}

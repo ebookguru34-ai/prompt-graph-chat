@@ -152,3 +152,9 @@ button.icon{padding:4px 10px;min-width:36px}button.icon.on{border-color:var(--ac
 .src{font-size:11px;padding:0 5px;border-radius:4px;background:var(--panel2)}.src.llm{color:var(--accent)}.src.user{color:var(--ok)}.src.rule{color:var(--warn)}
 .profwrap summary{cursor:pointer;color:var(--accent);font-size:13px}
 @media (max-width:768px){.prow input,.prow select{font-size:16px!important;padding:3px 4px}}
+/* ===== Manual triggers ===== */
+.triggerbar{display:flex;gap:6px;flex-wrap:wrap;padding:6px 16px 0}
+.trigger{font-size:12px;padding:3px 10px;border-radius:999px}.trigger.armed{background:#5a3d10;border-color:var(--warn);color:#ffd88a;box-shadow:0 0 0 2px #d2992244}
+.trigger.now{border-style:dashed}
+.toast{margin:6px 16px 0;padding:6px 10px;border-radius:6px;background:#1d3a24;border:1px solid var(--ok);color:#b7f0c2;font-size:13px;cursor:pointer}
+@media (max-width:768px){.triggerbar{padding:6px 8px 0}.trigger{min-height:34px}.toast{margin:6px 8px 0}}

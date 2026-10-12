@@ -1,7 +1,7 @@
 // Dynamic character profiles: schema + values + commit history, stored per character at pgc.profile.<charId>
 // (no-character chats use pgc.profile._global). Every change is a commit tagged with the chat turn, so
 // regenerate/edit/delete can roll it back like memory.
-import { storage, rollbackTurns as rollbackMemTurns } from './memory';
+import { storage, rollbackTurns as rollbackMemTurns, retagTurn as retagMem } from './memory';
 
 export type FieldType = 'text' | 'number' | 'list' | 'map';
 export interface ProfileField { key: string; type: FieldType; description?: string; min?: number; max?: number; locked?: boolean; default?: unknown; }
@@ -223,3 +223,10 @@ export const EXAMPLE_SCHEMA: ProfileField[] = [
   { key: 'relationships', type: 'map', description: 'name -> short description of relationship', default: {} },
   { key: 'name', type: 'text', description: 'character name', locked: true },
 ];
+
+/** Re-tag memory entries and profile commits from one turn id to another (undefined = untagged). */
+export function retagTurn(from: string, to: string | undefined) {
+  retagMem(from, to);
+  for (const ns of listProfileNamespaces()) { const n = ns === '_global' ? undefined : ns; const p = loadProfile(n);
+    if (p.commits.some((c) => c.turn === from)) { p.commits.forEach((c) => { if (c.turn === from) c.turn = to; }); saveProfile(p, n); } }
+}

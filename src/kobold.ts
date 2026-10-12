@@ -49,3 +49,10 @@ export async function generateStream(base: string, body: object, onToken: (t: st
   if (!gotAny && !full) { /* empty but valid stream is allowed */ }
   return full;
 }
+/** Embeddings via KoboldCPP's OpenAI-compatible /v1/embeddings (needs an embeddings model loaded). */
+export async function embeddings(base: string, input: string[], signal?: AbortSignal): Promise<number[][]> {
+  const j = await (await req(base, '/v1/embeddings', { method: 'POST', body: JSON.stringify({ model: 'kcpp', input }), signal })).json();
+  const data = (j.data ?? []) as { embedding: number[]; index?: number }[];
+  if (data.length !== input.length || !data.every((d) => Array.isArray(d.embedding))) throw new KoboldError('Embeddings response malformed');
+  return [...data].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((d) => d.embedding);
+}

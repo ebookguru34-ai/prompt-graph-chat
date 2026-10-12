@@ -22,6 +22,8 @@ export interface PipelineContext {
   onToken?: (t: string) => void;
   dryRun?: boolean;
   turnId?: string;
+  armed?: Record<string, boolean>;   // Manual Trigger node ids armed for this run
+  onTriggerFired?: (nodeId: string) => void;
   charName?: string;           // active character name ({{char}})
   greeting?: string;           // active character greeting ({{greeting}})
   memNs?: string;              // memory namespace (character id); undefined = legacy global stores             // id of the assistant reply being generated (tags memory writes)            // stop before generate (for preview)

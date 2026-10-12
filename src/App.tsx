@@ -5,7 +5,7 @@ import { load, save, uid } from './storage';
 import * as kobold from './kobold';
 import { DEFAULT_PIPELINE, runPipeline, type PipelineContext, type TraceEntry } from './pipeline';
 import { runGraph } from './graph/runner';
-import { rollbackTurns } from './graph/profile'; // memory + profile rollback
+import { rollbackTurns, retagTurn } from './graph/profile'; // memory + profile rollback
 import { DEFAULT_GRAPH } from './graph/defaults';
 import { Editor } from './graph/Editor';
 import type { Graph, NodeTrace } from './graph/types';
@@ -66,6 +66,9 @@ export default function App() {
     if (!chunks.length) return;
     player.unlock(); player.speak(id, chunks);
   }
+  const [armed, setArmed] = useState<Record<string, boolean>>({});
+  const [toast, setToast] = useState('');
+  useEffect(() => { if (!toast) return; const h = setTimeout(() => { setToast(''); }, 4000); return () => { clearTimeout(h); }; }, [toast]);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -93,7 +96,7 @@ export default function App() {
     setChats((cs) => cs.map((c) => (c.id === id ? { ...fn(c), updatedAt: Date.now() } : c))), []);
 
   const baseCtx = (history: Message[]): PipelineContext => ({ systemPrompt: effectiveSystem, history, template, samplers, settings,
-    charName: activeChar?.name, greeting: activeChar ? substChar(activeChar.greeting, activeChar.name, userName) : undefined, memNs: activeChar?.id });
+    armed, charName: activeChar?.name, greeting: activeChar ? substChar(activeChar.greeting, activeChar.name, userName) : undefined, memNs: activeChar?.id });
   /** New chat, optionally with a character: its greeting becomes the first assistant message. */
   function startChat(charId?: string) {
     const ch = charId ? characters.find((c) => c.id === charId) : undefined;
@@ -126,7 +129,12 @@ export default function App() {
     }
     return runPipeline(DEFAULT_PIPELINE, ctx, live ? setTrace : undefined);
   }
-  async function runGeneration(chatId: string, history: Message[]) {
+  /** Run the graph and append the reply. `runNow`: Manual Trigger "run now" pass (no new user message);
+   *  if it produces no chat output the placeholder is dropped and its memory/profile writes are re-tagged
+   *  to the last message, so rollback still works. */
+  async function runGeneration(chatId: string, history: Message[], opts: { runNow?: string } = {}) {
+    const runArmed = opts.runNow ? { ...armed, [opts.runNow]: true } : armed;
+    const fired: string[] = [];
     setError(''); setBusy(true);
     const asstId = uid();
     updateChat(chatId, (c) => ({ ...c, messages: [...history, { id: asstId, role: 'assistant', content: '' }] }));
@@ -137,13 +145,18 @@ export default function App() {
     if (live) player.begin(asstId);
     const onToken = (t: string) => { streamed = true; streamer?.push(t); updateChat(chatId, (c) => ({ ...c, messages: c.messages.map((m) => m.id === asstId ? { ...m, content: m.content + t } : m) })); };
     try {
-      const { ctx } = await execute({ ...baseCtx(history), signal: ac.signal, onToken, turnId: asstId }, true);
+      const { ctx } = await execute({ ...baseCtx(history), armed: runArmed, onTriggerFired: (id) => { fired.push(id); }, signal: ac.signal, onToken, turnId: asstId }, true);
+      if (fired.length) setArmed((a) => { const n = { ...a }; for (const id of fired) delete n[id]; return n; }); // disarm after firing
       if (live && !ac.signal.aborted) {
         if (streamed) streamer!.end(); else { const [chunks] = splitSentences(cleanForSpeech(ctx.output ?? '', tts), true); chunks.forEach((c) => { player.enqueue(c); }); }
         player.finish();
       } else if (live) player.stop();
       setPreview({ prompt: ctx.prompt ?? '', tokens: ctx.promptTokens ?? 0, method: ctx.tokenMethod ?? '', dropped: ctx.droppedMessages ?? 0, label: 'last request (sent)' });
-      updateChat(chatId, (c) => ({ ...c, messages: c.messages.map((m) => m.id === asstId ? { ...m, content: ctx.output ?? '' } : m) }));
+      if (opts.runNow && !(ctx.output ?? '').trim()) {
+        updateChat(chatId, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== asstId) }));
+        retagTurn(asstId, history[history.length - 1]?.id);
+        setToast('Graph ran (no chat output): memory/profile updated.');
+      } else updateChat(chatId, (c) => ({ ...c, messages: c.messages.map((m) => m.id === asstId ? { ...m, content: ctx.output ?? '' } : m) }));
     } catch (e) {
       setError((e as Error).message); player.stop();
       updateChat(chatId, (c) => ({ ...c, messages: c.messages.filter((m) => !(m.id === asstId && !m.content)) }));
@@ -158,6 +171,14 @@ export default function App() {
     const history = [...chat.messages, msg];
     if (chat.title === 'New chat') updateChat(chat.id, (c) => ({ ...c, title: msg.content.slice(0, 40) }));
     if (override === undefined) setInput(''); setNodeTrace([]); runGeneration(chat.id, history);
+  }
+  const triggers = settings.useGraph ? runGraphDef.nodes.filter((n) => n.type === 'manual_trigger') : [];
+  function pressTrigger(id: string, behavior: string) {
+    if (behavior === 'run now') {
+      if (busy || !chat) return;
+      player.stop(); if (tts.enabled) player.unlock(); setNodeTrace([]);
+      runGeneration(chat.id, chat.messages, { runNow: id });
+    } else setArmed((a) => ({ ...a, [id]: !a[id] }));
   }
   function regenerate() {
     if (busy || !chat) return;
@@ -271,6 +292,14 @@ export default function App() {
           <div ref={endRef} />
         </div>
         {error && <div className="error">⚠ {error}</div>}
+        {!!triggers.length && (
+          <div className="triggerbar">
+            {triggers.map((n) => { const beh = String(n.config.behavior ?? 'arm for next message'); const on = !!armed[n.id];
+              return <button key={n.id} className={'trigger' + (on ? ' armed' : '') + (beh === 'run now' ? ' now' : '')} disabled={beh === 'run now' && busy}
+                title={beh === 'run now' ? 'Run the graph now (no new message)' : on ? 'Armed for the next message (tap to disarm)' : 'Arm for the next message'}
+                onClick={() => pressTrigger(n.id, beh)}>{beh === 'run now' ? '▶' : on ? '●' : '○'} {String(n.config.label || 'Trigger')}</button>; })}
+          </div>)}
+        {toast && <div className="toast" onClick={() => setToast('')}>{toast}</div>}
         <div className="composer">
           <textarea rows={mobile ? 1 : 3} placeholder={mobile ? 'Message' : 'Message (Enter to send, Shift+Enter newline)'} value={input}
             onChange={(e) => setInput(e.target.value)}

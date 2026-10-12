@@ -23,6 +23,8 @@ const lastUser = (h: Message[]) => [...h].reverse().find((m) => m.role === 'user
 export const fill = (tpl: string, vars: Record<string, unknown>) => tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => str(vars[k]));
 import { readMem, writeMem, listStores, appendMem } from './memory';
 export { readMem, writeMem, listStores };
+import { bm25Rank, embeddingRank, everyFires, turnNumber } from './search';
+import { estimateTokens as estTok } from '../pipeline';
 import { loadProfile, profileLines, getPath, fieldValue, fmt, validatePatch, commit, parsePatchText, updateInstruction, applyTick } from './profile';
 const profVal = (env: RunEnv, path: string) => { const p = loadProfile(env.ctx.memNs); const f = p.schema.find((x) => x.key === path); return f ? fieldValue(p, f) : getPath(p.values, path); };
 /** {{profile}} = all fields, {{profile.<path>}} = one value. */
@@ -178,6 +180,72 @@ export const NODE_DEFS: NodeDef[] = [
       const hit = ({ '<': x < y, '<=': x <= y, '>': x > y, '>=': x >= y, '==': x === y, '!=': x !== y } as Record<string, boolean>)[String(c.op)] ?? false;
       const t = str(i.text) || `${c.path} = ${fmt(a)}`;
       return hit ? { match: t, else: SKIP } : { match: SKIP, else: t };
+    } },
+  { type: 'every_n', label: 'Every N', color: '#db61a2', category: 'logic', inputs: ['text'], outputs: ['text', 'turn'],
+    fields: [{ key: 'mode', label: 'Mode', kind: 'select', options: ['every N turns', 'after turn X', 'once at turn X', 'between X-Y'] },
+      { key: 'n', label: 'N (every N turns)', kind: 'number' }, { key: 'offset', label: 'Offset (every N: fire at turns offset+N, offset+2N…)', kind: 'number' },
+      { key: 'x', label: 'X', kind: 'number' }, { key: 'y', label: 'Y (between)', kind: 'number' }],
+    defaults: { mode: 'every N turns', n: 5, offset: 0, x: 1, y: 10 },
+    run: (i, c, env) => {
+      const turn = turnNumber(env.ctx.history); // assistant replies so far + 1; regenerate doesn't advance
+      const fire = everyFires(String(c.mode), turn, Number(c.n), Number(c.x), Number(c.y), Number(c.offset) || 0);
+      const pass = 'text' in i ? i.text : String(turn);
+      return fire ? { text: pass, turn: String(turn) } : { text: SKIP, turn: SKIP, _turn: turn };
+    } },
+  { type: 'manual_trigger', label: 'Manual Trigger', color: '#db61a2', category: 'logic', inputs: ['text'], outputs: ['text'],
+    fields: [{ key: 'label', label: 'Button label', kind: 'text' }, { key: 'behavior', label: 'Button behavior', kind: 'select', options: ['arm for next message', 'run now'],
+      help: 'Shows a button in the chat bar. Arm: the next message lets input through once. Run now: runs the graph immediately with no new user message.' }],
+    defaults: { label: 'Trigger', behavior: 'arm for next message' },
+    run: (i, _c, env, nodeId) => {
+      if (!env.ctx.armed?.[nodeId]) return { text: SKIP };
+      if (!env.dryRun) env.ctx.onTriggerFired?.(nodeId);
+      return { text: 'text' in i ? i.text : lastUser(env.ctx.history) };
+    } },
+  { type: 'json_extract', label: 'JSON Extract', color: '#a371f7', category: 'logic', inputs: ['text'], outputs: ['value', 'all'],
+    fields: [{ key: 'paths', label: 'Dot paths, one per line (first = value)', kind: 'textarea' }, { key: 'fallback', label: 'Fallback (missing / no JSON)', kind: 'text' }],
+    defaults: { paths: 'mood', fallback: '' },
+    run: (i, c) => {
+      const paths = String(c.paths ?? '').split('\n').map((x) => x.trim()).filter(Boolean); const fb = String(c.fallback ?? '');
+      let obj: Record<string, unknown> | null = null, err = '';
+      try { obj = parsePatchText(str(i.text)); } catch (e) { err = (e as Error).message; }
+      const get = (pth: string) => { const v = obj ? getPath(obj, pth) : undefined; return v === undefined ? fb : typeof v === 'object' && v !== null && !Array.isArray(v) ? JSON.stringify(v) : fmt(v); };
+      return { value: paths.length ? get(paths[0]) : obj ? JSON.stringify(obj) : fb, all: paths.map((x) => `${x}: ${get(x)}`).join('\n'), ...(err ? { _error: err } : {}) };
+    } },
+  { type: 'summarize', label: 'Summarize', color: '#d29922', category: 'llm', inputs: ['text', 'history'], outputs: ['text'], callsLLM: true,
+    fields: [{ key: 'threshold', label: 'Only summarize above N tokens (else pass through)', kind: 'number' },
+      { key: 'target', label: 'Target length (words)', kind: 'number' },
+      { key: 'instruction', label: 'Instruction ({{text}} {{target}} {{char}} {{user}})', kind: 'textarea' },
+      { key: 'store', label: 'Also save to memory store (replace; blank = off)', kind: 'text' },
+      { key: 'temperature', label: 'Temperature', kind: 'text' }, { key: 'max_length', label: 'Max length (tokens)', kind: 'number' }],
+    defaults: { threshold: 1000, target: 150, instruction: 'Summarize the following conversation in about {{target}} words. Keep names, facts, decisions and open threads. Write plain prose, no preamble.\n\n{{text}}',
+      store: '', temperature: '0.3', max_length: 400 },
+    run: async (i, c, env) => {
+      const src = 'text' in i ? str(i.text) : str(i.history ?? env.ctx.history);
+      const tokens = estTok(src);
+      if (tokens <= (Number(c.threshold) || 0)) return { text: src, _skippedLLM: `input ~${tokens} tokens ≤ threshold` };
+      const msgs: Message[] = [{ id: 'u', role: 'user', content: fill(String(c.instruction ?? ''), { ...vars(env), text: src, target: String(c.target ?? 150) }) }];
+      const out = await callKobold(env, renderPrompt(msgs, env.ctx.template), { ...c, stop: '' }, false);
+      const store = String(c.store ?? '').trim();
+      if (store && out && !env.dryRun) appendMem(store, out, env.ctx.turnId, 'replace', 0, env.ctx.memNs);
+      return { text: out, _inputTokens: tokens };
+    } },
+  { type: 'memory_search', label: 'Memory Search', color: '#2ea043', category: 'memory', inputs: ['query'], outputs: ['text'],
+    fields: [{ key: 'store', label: 'Store name', kind: 'text' }, { key: 'topK', label: 'Top K', kind: 'number' },
+      { key: 'method', label: 'Method', kind: 'select', options: ['keyword', 'embeddings'], help: 'Embeddings use KoboldCPP /v1/embeddings (load an embeddings model); falls back to keyword on error. Vectors are cached in the browser.' },
+      { key: 'joiner', label: 'Join with', kind: 'text' }],
+    defaults: { store: 'notes', topK: 3, method: 'keyword', joiner: '\\n' },
+    run: async (i, c, env) => {
+      const q = 'query' in i ? str(i.query) : lastUser(env.ctx.history);
+      const docs = readMem(String(c.store), env.ctx.memNs); const k = Math.max(1, Number(c.topK) || 3);
+      const join = String(c.joiner ?? '\n').replace(/\\n/g, '\n');
+      if (!q.trim() || !docs.length) return { text: '', _method: 'none' };
+      let method = String(c.method), note = '', ranked: { i: number; score: number }[];
+      if (method === 'embeddings' && !env.dryRun) {
+        try { ranked = await embeddingRank(q, docs, (t) => kobold.embeddings(env.ctx.settings.koboldUrl, t, env.ctx.signal)); }
+        catch (e) { method = 'keyword'; note = 'embeddings failed (' + (e as Error).message + '), used keyword'; ranked = bm25Rank(q, docs); }
+      } else { if (method === 'embeddings') { method = 'keyword'; note = 'dry run: keyword preview'; } ranked = bm25Rank(q, docs); }
+      const top = ranked.slice(0, k);
+      return { text: top.map((r) => docs[r.i]).join(join), _method: method, _scores: top.map((r) => r.score.toFixed(3)).join(', '), ...(note ? { _note: note } : {}) };
     } },
   { type: 'merge', label: 'Merge', color: '#a371f7', category: 'logic', inputs: ['a', 'b'], outputs: ['text'],
     fields: [{ key: 'text', label: 'Template ({{a}} {{b}} {{user}} {{system}} {{char}} {{greeting}})', kind: 'textarea' }], defaults: { text: '{{a}}\n\n{{b}}' },
